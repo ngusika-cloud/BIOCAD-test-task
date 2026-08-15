@@ -1,0 +1,46 @@
+[project]
+name = "planpilot-backend"
+version = "0.1.0"
+description = "FastAPI backend for the PlanPilot planning workspace"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.116.0",
+    "mcp>=1.13.0,<2.0.0",
+    "openpyxl>=3.1.5",
+    "pydantic>=2.11.0",
+    "python-multipart>=0.0.20",
+    "uvicorn[standard]>=0.35.0",
+]
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pre-commit>=4.6.2",
+    "pytest>=8.4.0",
+    "python-dotenv>=1.2.2",
+    "ruff>=0.16.3",
+]
+[project.scripts]
+planpilot = "backend.main:run"
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests", "scripts"]
+force-exclude = true
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "TID", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.uv.build-backend]
+module-name = "backend"
