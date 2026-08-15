@@ -1,96 +1,89 @@
 # BIOCAD Gantt chart
 
-BIOCAD Gantt chart is a desktop-first planning workspace for biotech teams. It combines an interactive Gantt chart with natural-language plan editing, validated Excel import/export, multilingual task details, categorical team assignment, and man-hour calculation. Its LangGraph ReAct agent uses Qwen3.7 Flash through OpenRouter.
+Веб-приложение для планирования проектов: диаграмма Ганта, редактирование задач на естественном языке, импорт и экспорт Excel, проверка зависимостей и расчёт трудозатрат.
 
-## What works
+## Быстрый запуск
 
-- Seed project with 12 tasks, parallel branches, dependencies, and five assignees
-- Interactive [SVAR React Gantt](https://svar.dev/react/gantt/) (MIT open-source edition)
-- Task selection, details editing, dependency validation, and deletion
-- Excel preview, validation, confirmation, export, and round-trip support
-- ReAct planning agent with clarification questions, streamed replies, conversation history, and validated planning tools
-- Per-run input/output token counts and actual OpenRouter cost reporting
-- Seed reset
-- FastAPI REST API and a stdio MCP server sharing the same store and scheduler
+Требования: Python 3.11+, [uv](https://docs.astral.sh/uv/) и Node.js 20+.
 
-Example commands: Assign Hit analysis to Elena; Move Primary screening by 3 days; Add a 3-day QA task after Lead selection; Make Candidate review depend on QA; Move all of Anna's tasks by one week.
+```bash
+git clone https://github.com/ngusika-cloud/BIOCAD-test-task.git
+cd BIOCAD-test-task
+cp .env.example .env  # PowerShell: Copy-Item .env.example .env
 
-## Local development
-
-Requirements: Node.js 20+ and Python 3.11+. Install [uv](https://docs.astral.sh/uv/) once if needed.
-
-Backend:
-
-    cd backend
-    uv sync --all-groups
-    uv run uvicorn backend.main:app --reload
-
-Frontend, in another terminal:
-
-    cd frontend
-    npm ci
-    npm run dev
-
-Open http://localhost:5173. Vite proxies /api to FastAPI on port 8000.
-
-Verification:
-
-    cd backend
-    uv run pytest
-    uv run pre-commit run --all-files --config ../.pre-commit-config.yaml
-    cd ../frontend
-    npm run build
-
-Install the Git hook locally with `cd backend` followed by
-`uv run pre-commit install --config ../.pre-commit-config.yaml`.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    UI[React application] --> Gantt[SVAR Gantt]
-    UI -->|REST API| Routes[FastAPI routes]
-    MCP[MCP stdio tools] --> Services[Shared project services]
-    Routes --> Agent[LangGraph ReAct agent]
-    Agent -->|Qwen3.7 Flash| OpenRouter[OpenRouter]
-    Agent --> Services
-    Services --> Validation[Task and dependency validation]
-    Validation --> Scheduler[Deterministic scheduler]
-    Scheduler --> Store[In-memory project store]
-    Store -->|Scheduled project state| Routes
+cd backend
+uv sync --all-groups
+uv run uvicorn backend.main:app --reload
 ```
 
-The backend is the source of truth. Every REST or MCP mutation creates a candidate snapshot, validates identifiers and the dependency DAG, and only then commits and recalculates dates. The scheduler uses calendar days; roots begin at the project start, dependent tasks begin the day after their latest predecessor, and explicit move offsets are applied afterward. LLMs never calculate dates.
+Во втором терминале:
 
-Data is intentionally in memory for the demo. Restarting the backend restores the seed.
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
-## Excel format
+Приложение: http://localhost:5173, документация API: http://localhost:8000/docs. В dev-режиме Vite перенаправляет `/api` и `/health` на backend.
 
-The first row must contain task, description, executor, duration, and predecessors. Executors are comma- or semicolon-separated team members, and predecessors are comma-separated task names. Names must be unique; durations are whole days. See [sample/planpilot-sample.xlsx](sample/planpilot-sample.xlsx).
+## Переменные окружения
 
-## API and MCP
+Корневой файл `.env` создаётся из `.env.example` и не должен попадать в Git. Опциональная переменная Vite задаётся отдельно в `frontend/.env.local`.
 
-REST includes health, project read/reset, task create/update/delete, import preview/confirm, export, agent configuration, regular chat, and SSE streaming chat. Interactive API docs are at http://localhost:8000/docs.
+| Переменная | Назначение | Значение по умолчанию |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | Ключ OpenRouter; обязателен только для AI-ассистента | — |
+| `OPENROUTER_MODEL` | Модель ассистента | `qwen/qwen3.7-flash` |
+| `OPENROUTER_SITE_URL` | HTTP Referer для OpenRouter | URL опубликованного приложения |
+| `CORS_ORIGINS` | Разрешённые origin через запятую | `http://localhost:5173` |
+| `VITE_API_URL` | Адрес API в `frontend/.env.local` для отдельно размещённого frontend | пусто, используются относительные URL |
 
-Start MCP with:
+## Воспроизводимость и проверки
 
-    cd backend
-    uv run python -m backend.mcp_server
+Версии Python-зависимостей зафиксированы в `backend/uv.lock`, frontend-зависимостей — в `frontend/package-lock.json`. Используйте `uv sync --all-groups` и `npm ci`, не удаляя lock-файлы.
 
-Tools: get_project_state, get_tasks, add_task, update_task, move_task, change_assignees, set_dependencies, and delete_task. They reuse the same business operations as REST.
+```bash
+cd backend
+uv run pytest
+uv run pre-commit run --all-files --config ../.pre-commit-config.yaml
 
-## Environment
+cd ../frontend
+npm run build
+```
 
-Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`. The default model is `qwen/qwen3.7-flash`; override it with `OPENROUTER_MODEL`. On Render, configure both values on the backend service. `VITE_API_URL` may point the frontend at a separately hosted API.
+Pre-commit запускает Ruff для линтинга, сортировки импортов и форматирования. Тестовые Excel-файлы находятся в `sample/`. Данные приложения хранятся в памяти и после перезапуска backend сбрасываются к начальному набору.
 
-## Key decisions
+## Архитектура и технологии
 
-- SVAR provides a maintained React-native Gantt instead of a custom timeline.
-- Chat chrome is local because the product needs compact, domain-specific change and usage cards; assistant behavior stays behind one API.
-- Import is two-phase so users inspect a validated replacement before committing.
-- Internal IDs are stable; Excel translates predecessor names only at the boundary.
-- OpenRouter's returned usage cost is displayed directly; token-price calculation is only a fallback when a provider omits cost.
+```mermaid
+flowchart LR
+    UI[React + SVAR Gantt] -->|REST / SSE| API[FastAPI]
+    MCP[MCP-клиент] -->|stdio| MCPServer[MCP-сервер]
+    API --> Agent[LangGraph ReAct-агент]
+    Agent -->|LLM API| OpenRouter[OpenRouter]
+    Agent --> Services[Операции над проектом]
+    API --> Services
+    MCPServer --> Services
+    API <--> Excel[Импорт / экспорт Excel]
+    Services --> Validation[Валидация зависимостей]
+    Validation --> Scheduler[Расчёт расписания]
+    Scheduler --> Store[(In-memory store)]
+```
 
-## Current limits
+- **Frontend:** React 19, TypeScript, Vite и SVAR React Gantt. UI обращается к backend через REST API и SSE для потоковых ответов ассистента.
+- **Backend:** FastAPI, Pydantic и Uvicorn. REST API и stdio MCP-сервер используют единые операции над проектом.
+- **Планирование:** детерминированный scheduler проверяет уникальность задач, ссылки и отсутствие циклов, затем рассчитывает даты и человеко-часы. LLM даты не вычисляет.
+- **AI:** ReAct-агент на LangGraph вызывает OpenRouter и изменяет план только через валидируемые инструменты.
+- **Данные:** in-memory store — осознанное упрощение демонстрационной версии; Excel обрабатывается через openpyxl.
 
-State is process-local, dates use calendar days, task bar drag editing is not persisted, agent conversation history is request-local, and there is no authentication or collaboration. See [Roadmap to production](docs/ROADMAP_TO_PRODUCTION.md).
+Поддерживаемость обеспечивают разделение моделей, хранилища, планировщика, Excel-адаптера, API и агента; единая бизнес-логика для REST/MCP; типизация; атомарная проверка снимка до сохранения; unit- и API-тесты; Ruff и pre-commit.
+
+## Использование AI
+
+AI использовался как вспомогательный инструмент разработки. В частности, применялись специализированные skills для code review и поддержания качества кода. Итоговые изменения проверялись тестами, статическим анализом и сборкой; ответственность за принятые решения и результат остаётся за разработчиком.
+
+## Ограничения
+
+Нет постоянного хранилища, аутентификации и совместного редактирования; расчёт ведётся в календарных днях. План развития описан в [docs/ROADMAP_TO_PRODUCTION.md](docs/ROADMAP_TO_PRODUCTION.md).
+
+Лицензия: [MIT](LICENSE).
