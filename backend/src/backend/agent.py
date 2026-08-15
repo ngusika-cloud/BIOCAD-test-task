@@ -66,7 +66,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "assign_people",
-            "description": "Replace the people assigned to an existing task.",
+            "description": "Replace the complete set of people assigned to an existing task.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -78,6 +78,30 @@ TOOLS = [
                     },
                 },
                 "required": ["task_id", "assignees"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "change_assignees",
+            "description": (
+                "Add particular people to a task or remove particular people without replacing "
+                "the task's other assignees."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Exact task ID from the plan."},
+                    "action": {"type": "string", "enum": ["add", "remove"]},
+                    "people": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": [person.value for person in Person]},
+                        "minItems": 1,
+                    },
+                },
+                "required": ["task_id", "action", "people"],
                 "additionalProperties": False,
             },
         },
@@ -112,6 +136,56 @@ TOOLS = [
                     "duration": {"type": "integer", "minimum": 1, "maximum": 365},
                 },
                 "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "batch_update_tasks",
+            "description": (
+                "Update many existing tasks in one call. Prefer this for bulk plan changes instead "
+                "of calling update tools one task at a time. start_offset is an absolute offset."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "updates": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 100,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "task_id": {"type": "string"},
+                                "name": {"type": "string", "minLength": 1, "maxLength": 160},
+                                "description": {"type": "string"},
+                                "assignees": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "enum": [person.value for person in Person],
+                                    },
+                                    "minItems": 1,
+                                },
+                                "duration": {"type": "integer", "minimum": 1, "maximum": 365},
+                                "predecessor_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "start_offset": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 365,
+                                },
+                            },
+                            "required": ["task_id"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["updates"],
                 "additionalProperties": False,
             },
         },
@@ -190,6 +264,26 @@ def _execute_tool(
                 task_name=task["name"],
                 description=f"Assigned to {people}",
             )
+        elif name == "change_assignees":
+            source = next(item for item in project_store.snapshot.tasks if item.id == task_id)
+            requested_people = arguments["people"]
+            if arguments["action"] == "add":
+                assignees = list(dict.fromkeys([*source.assignees, *requested_people]))
+                description = f"Added {', '.join(requested_people)} to assignees"
+            else:
+                assignees = [
+                    person for person in source.assignees if person not in requested_people
+                ]
+                if not assignees:
+                    raise ValueError("A task must keep at least one assignee")
+                description = f"Removed {', '.join(requested_people)} from assignees"
+            project_store.update(task_id, TaskUpdate(assignees=assignees))
+            task = _task_result(project_store, task_id)
+            change = Change(
+                task_id=task_id,
+                task_name=task["name"],
+                description=description,
+            )
         elif name == "move_task":
             source = next(item for item in project_store.snapshot.tasks if item.id == task_id)
             days = arguments["days_later"]
@@ -209,6 +303,39 @@ def _execute_tool(
                 task_name=task["name"],
                 description="Updated task details",
             )
+        elif name == "batch_update_tasks":
+            known_ids = {item.id for item in project_store.snapshot.tasks}
+            prepared_updates = []
+            for item in arguments["updates"]:
+                item_task_id = item["task_id"]
+                if item_task_id not in known_ids:
+                    raise ValueError(f"Task not found: {item_task_id}")
+                values = {key: value for key, value in item.items() if key != "task_id"}
+                if not values:
+                    raise ValueError(f"No updates supplied for task: {item_task_id}")
+                prepared_updates.append((item_task_id, TaskUpdate(**values)))
+            candidate = project_store.snapshot.model_copy(deep=True)
+            candidate_by_id = {item.id: index for index, item in enumerate(candidate.tasks)}
+            for item_task_id, update in prepared_updates:
+                index = candidate_by_id[item_task_id]
+                source = candidate.tasks[index]
+                candidate.tasks[index] = TaskCreate(
+                    **(source.model_dump() | update.model_dump(exclude_none=True))
+                )
+            project_store.replace(candidate)
+            changes = []
+            tasks = []
+            for item_task_id, _update in prepared_updates:
+                task = _task_result(project_store, item_task_id)
+                tasks.append(task)
+                changes.append(
+                    Change(
+                        task_id=item_task_id,
+                        task_name=task["name"],
+                        description="Updated task details",
+                    )
+                )
+            return {"updated_tasks": tasks}, changes
         elif name == "add_task":
             item = TaskCreate(id=str(uuid4()), **arguments)
             project_store.add(item)
@@ -417,7 +544,7 @@ def run_agent(
         "model": requested_model,
     }
     try:
-        result = graph.invoke(initial, config={"recursion_limit": 12})
+        result = graph.invoke(initial, config={"recursion_limit": 50})
     except GraphRecursionError as exc:
         raise AgentError("The planning agent exceeded its tool-call limit") from exc
     final_message = result["messages"][-1]
