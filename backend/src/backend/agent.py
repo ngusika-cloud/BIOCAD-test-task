@@ -19,6 +19,8 @@ from backend.store import ProjectStore
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "qwen/qwen3.7-flash"
+DEFAULT_MAX_TOOL_CALLS_PER_ROUND = 10
+DEFAULT_RECURSION_LIMIT = 50
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 prompt_environment = Environment(
@@ -39,6 +41,13 @@ class AgentConfigurationError(AgentError):
 
 def configured_model() -> str:
     return os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+
+
+def _integer_setting(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        return min(maximum, max(minimum, int(os.getenv(name, str(default)))))
+    except ValueError:
+        return default
 
 
 class AgentState(TypedDict):
@@ -384,6 +393,12 @@ def _system_prompt(project_store: ProjectStore) -> str:
     return prompt_environment.get_template("planning_agent.j2").render(
         available_people=", ".join(project.team),
         current_plan=json.dumps(plan, ensure_ascii=False, default=str),
+        max_tool_calls_per_round=_integer_setting(
+            "AGENT_MAX_TOOL_CALLS_PER_ROUND",
+            DEFAULT_MAX_TOOL_CALLS_PER_ROUND,
+            1,
+            25,
+        ),
     )
 
 
@@ -397,6 +412,13 @@ def run_agent(
     if not api_key or api_key.startswith("sk-or-v1-your-key"):
         raise AgentConfigurationError("OPENROUTER_API_KEY is not configured")
     requested_model = configured_model()
+    max_tool_calls_per_round = _integer_setting(
+        "AGENT_MAX_TOOL_CALLS_PER_ROUND",
+        DEFAULT_MAX_TOOL_CALLS_PER_ROUND,
+        1,
+        25,
+    )
+    recursion_limit = _integer_setting("AGENT_RECURSION_LIMIT", DEFAULT_RECURSION_LIMIT, 10, 200)
 
     def call_model(state: AgentState) -> AgentState:
         headers = {
@@ -407,6 +429,8 @@ def run_agent(
             ),
             "X-Title": "BIOCAD Gantt chart",
         }
+        messages = list(state["messages"])
+        messages[0] = {"role": "system", "content": _system_prompt(project_store)}
         try:
             with httpx.stream(
                 "POST",
@@ -414,7 +438,7 @@ def run_agent(
                 headers=headers,
                 json={
                     "model": requested_model,
-                    "messages": state["messages"],
+                    "messages": messages,
                     "tools": TOOLS,
                     "tool_choice": "auto",
                     "temperature": 0.1,
@@ -494,13 +518,26 @@ def run_agent(
     def call_tools(state: AgentState) -> AgentState:
         tool_messages = []
         changes = []
-        for tool_call in state["messages"][-1].get("tool_calls", []):
+        tool_calls = state["messages"][-1].get("tool_calls", [])
+        for index, tool_call in enumerate(tool_calls):
             function = tool_call["function"]
-            try:
-                arguments = json.loads(function.get("arguments") or "{}")
-                result, tool_changes = _execute_tool(project_store, function["name"], arguments)
-            except (TypeError, ValueError) as exc:
-                result, tool_changes = {"error": f"Invalid tool arguments: {exc}"}, []
+            if index >= max_tool_calls_per_round:
+                result, tool_changes = (
+                    {
+                        "deferred": True,
+                        "message": (
+                            "Not executed in this batch. Submit this operation again in the next "
+                            "tool-call round."
+                        ),
+                    },
+                    [],
+                )
+            else:
+                try:
+                    arguments = json.loads(function.get("arguments") or "{}")
+                    result, tool_changes = _execute_tool(project_store, function["name"], arguments)
+                except (TypeError, ValueError) as exc:
+                    result, tool_changes = {"error": f"Invalid tool arguments: {exc}"}, []
             tool_messages.append(
                 {
                     "role": "tool",
@@ -544,7 +581,7 @@ def run_agent(
         "model": requested_model,
     }
     try:
-        result = graph.invoke(initial, config={"recursion_limit": 50})
+        result = graph.invoke(initial, config={"recursion_limit": recursion_limit})
     except GraphRecursionError as exc:
         raise AgentError("The planning agent exceeded its tool-call limit") from exc
     final_message = result["messages"][-1]

@@ -35,6 +35,8 @@ npm run dev
 | `OPENROUTER_API_KEY` | Ключ OpenRouter; обязателен только для AI-ассистента | — |
 | `OPENROUTER_MODEL` | Модель ассистента | `qwen/qwen3.7-flash` |
 | `OPENROUTER_SITE_URL` | HTTP Referer для OpenRouter | URL опубликованного приложения |
+| `AGENT_MAX_TOOL_CALLS_PER_ROUND` | Максимум операций в одном пакете агента | `10` |
+| `AGENT_RECURSION_LIMIT` | Общий предел шагов графа агента | `50` |
 | `CORS_ORIGINS` | Разрешённые origin через запятую | `http://localhost:5173` |
 | `VITE_API_URL` | Адрес API в `frontend/.env.local` для отдельно размещённого frontend | пусто, используются относительные URL |
 
