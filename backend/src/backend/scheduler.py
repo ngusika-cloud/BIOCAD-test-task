@@ -58,6 +58,7 @@ def schedule(snapshot: ProjectSnapshot) -> list[Task]:
             **source.model_dump(),
             start_date=start,
             end_date=start + timedelta(days=source.duration - 1),
+            man_hours=source.duration * 8 * len(source.assignees),
         )
         scheduled[task_id] = result
         return result

@@ -40,7 +40,11 @@ def parse_excel(content: bytes, project_name: str, start_date) -> ProjectSnapsho
                 "id": str(uuid4()),
                 "name": name,
                 "description": str(row[positions["description"]] or "").strip(),
-                "assignee": str(row[positions["executor"]] or "Unassigned").strip(),
+                "assignees": [
+                    name.strip()
+                    for name in str(row[positions["executor"]] or "").replace(";", ",").split(",")
+                    if name.strip()
+                ],
                 "duration": duration,
                 "predecessors": [
                     part.strip()
@@ -77,7 +81,7 @@ def export_excel(project) -> bytes:
             [
                 task.name,
                 task.description,
-                task.assignee,
+                ", ".join(task.assignees),
                 task.duration,
                 ", ".join(names[item] for item in task.predecessor_ids),
             ]

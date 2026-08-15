@@ -78,7 +78,7 @@ def check_chat_completion(client: httpx.Client, model: str) -> bool:
 def main() -> None:
     api_key = load_api_key()
     masked = f"...{api_key[-8:]}" if len(api_key) > 8 else "(set)"
-    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    model = os.getenv("OPENROUTER_MODEL", "qwen/qwen3.7-flash")
 
     print("OpenRouter check")
     print(f"  Env file: {ENV_PATH}")

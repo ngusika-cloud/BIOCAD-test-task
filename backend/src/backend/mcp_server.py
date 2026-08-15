@@ -3,7 +3,7 @@ from mcp.server.fastmcp import FastMCP
 from backend.models import TaskCreate, TaskUpdate
 from backend.store import store
 
-mcp = FastMCP("PlanPilot")
+mcp = FastMCP("BIOCAD Gantt chart")
 
 
 @mcp.tool()
@@ -20,13 +20,13 @@ def get_tasks() -> list[dict]:
 
 @mcp.tool()
 def add_task(
-    name: str, description: str, assignee: str, duration: int, predecessor_ids: list[str]
+    name: str, description: str, assignees: list[str], duration: int, predecessor_ids: list[str]
 ) -> dict:
     """Add one validated task and reschedule the project."""
     task = TaskCreate(
         name=name,
         description=description,
-        assignee=assignee,
+        assignees=assignees,
         duration=duration,
         predecessor_ids=predecessor_ids,
     )
@@ -38,11 +38,11 @@ def update_task(
     task_id: str,
     name: str | None = None,
     description: str | None = None,
-    assignee: str | None = None,
+    assignees: list[str] | None = None,
     duration: int | None = None,
 ) -> dict:
     """Update one task through shared validation and scheduling."""
-    update = TaskUpdate(name=name, description=description, assignee=assignee, duration=duration)
+    update = TaskUpdate(name=name, description=description, assignees=assignees, duration=duration)
     return store.update(task_id, update).model_dump(mode="json")
 
 
@@ -60,9 +60,9 @@ def move_task(task_id: str, days_later: int) -> dict:
 
 
 @mcp.tool()
-def change_assignee(task_id: str, assignee: str) -> dict:
-    """Assign a task to a named person."""
-    return store.update(task_id, TaskUpdate(assignee=assignee)).model_dump(mode="json")
+def change_assignees(task_id: str, assignees: list[str]) -> dict:
+    """Assign a task to one or more team members."""
+    return store.update(task_id, TaskUpdate(assignees=assignees)).model_dump(mode="json")
 
 
 @mcp.tool()

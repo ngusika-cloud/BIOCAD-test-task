@@ -1,1 +1,1 @@
-"""PlanPilot backend package."""
+"""BIOCAD Gantt chart backend package."""

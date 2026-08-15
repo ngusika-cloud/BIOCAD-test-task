@@ -106,7 +106,14 @@ def seed_snapshot() -> ProjectSnapshot:
         name="Biotech launch plan",
         start_date=date(2026, 8, 17),
         tasks=[
-            TaskCreate(id=i, name=n, description=d, assignee=a, duration=days, predecessor_ids=deps)
+            TaskCreate(
+                id=i,
+                name=n,
+                description=d,
+                assignees=[a],
+                duration=days,
+                predecessor_ids=deps,
+            )
             for i, n, d, a, days, deps in rows
         ],
     )

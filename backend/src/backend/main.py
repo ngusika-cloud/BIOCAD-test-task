@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
 import os
+from queue import Queue
+from threading import Thread
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
+from backend.agent import AgentConfigurationError, AgentError, configured_model, run_agent
 from backend.excel import export_excel, parse_excel
-from backend.mock_agent import run_mock_command
 from backend.models import (
     ChatRequest,
     ChatResponse,
@@ -20,7 +23,7 @@ from backend.models import (
 from backend.scheduler import PlanValidationError, schedule
 from backend.store import store
 
-app = FastAPI(title="PlanPilot API", version="0.1.0")
+app = FastAPI(title="BIOCAD Gantt chart API", version="0.1.0")
 cors_origins = [
     origin.strip()
     for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
@@ -56,6 +59,11 @@ def get_tasks():
     return store.project().tasks
 
 
+@app.get("/api/agent/config")
+def agent_config():
+    return {"model": configured_model()}
+
+
 @app.post("/api/tasks", response_model=Project)
 def add_task(task: TaskCreate):
     return store.add(task)
@@ -89,13 +97,58 @@ def undo():
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
-    project, changes = run_mock_command(store, request.message)
-    count = len(changes)
+    try:
+        reply, changes, usage = run_agent(store, request.message, history=request.history)
+    except AgentConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except AgentError as exc:
+        raise HTTPException(502, str(exc)) from exc
     return ChatResponse(
-        reply=f"Done — {count} task{'s' if count != 1 else ''} updated.",
+        reply=reply,
         changes=changes,
-        project=project,
-        can_undo=True,
+        project=store.project(),
+        can_undo=bool(changes),
+        usage=usage,
+    )
+
+
+@app.post("/api/chat/stream")
+def stream_chat(request: ChatRequest):
+    def events():
+        queue: Queue[tuple[str, object]] = Queue()
+
+        def run() -> None:
+            try:
+                reply, changes, usage = run_agent(
+                    store,
+                    request.message,
+                    history=request.history,
+                    on_token=lambda token: queue.put(("token", {"text": token})),
+                )
+                result = ChatResponse(
+                    reply=reply,
+                    changes=changes,
+                    project=store.project(),
+                    can_undo=bool(changes),
+                    usage=usage,
+                )
+                queue.put(("result", result.model_dump(mode="json")))
+            except (AgentConfigurationError, AgentError) as exc:
+                queue.put(("error", {"detail": str(exc)}))
+            finally:
+                queue.put(("done", None))
+
+        Thread(target=run, daemon=True).start()
+        while True:
+            event, payload = queue.get()
+            if event == "done":
+                break
+            yield f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -128,7 +181,7 @@ def download_export():
     return Response(
         content=export_excel(store.project()),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="planpilot.xlsx"'},
+        headers={"Content-Disposition": 'attachment; filename="biocad-gantt.xlsx"'},
     )
 
 

@@ -4,6 +4,7 @@ import pytest
 from openpyxl import Workbook
 
 from backend.excel import export_excel, parse_excel
+from backend.models import Person
 from backend.scheduler import PlanValidationError
 from backend.seed import seed_snapshot
 from backend.store import ProjectStore
@@ -22,9 +23,11 @@ def workbook(rows):
 
 def test_excel_round_trip():
     source = ProjectStore()
+    source.snapshot.tasks[0].assignees = [Person.ELENA, Person.PAVEL]
     data = export_excel(source.project())
     parsed = parse_excel(data, "Imported", source.snapshot.start_date)
     assert len(parsed.tasks) == 12
+    assert parsed.tasks[0].assignees == ["Elena", "Pavel"]
     assert parsed.tasks[-1].predecessor_ids
 
 
