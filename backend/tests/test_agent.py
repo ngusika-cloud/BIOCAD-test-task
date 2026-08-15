@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from backend.agent import run_agent
+from backend.agent import _execute_tool, run_agent
 from backend.models import ChatMessage
 from backend.store import ProjectStore
 
@@ -122,3 +122,50 @@ def test_agent_sends_history_and_streams_reply(monkeypatch):
     assert captured["stream"] is True
     assert captured["messages"][-3]["content"] == "I need to move a task"
     assert "ask one focused clarification" in captured["messages"][0]["content"]
+
+
+def test_assignees_can_be_added_and_removed_without_replacing_others():
+    project_store = ProjectStore()
+
+    _execute_tool(
+        project_store,
+        "change_assignees",
+        {"task_id": "analysis", "action": "add", "people": ["Pavel"]},
+    )
+    task = next(item for item in project_store.project().tasks if item.id == "analysis")
+    assert task.assignees == ["Anna", "Pavel"]
+
+    _execute_tool(
+        project_store,
+        "change_assignees",
+        {"task_id": "analysis", "action": "remove", "people": ["Anna"]},
+    )
+    task = next(item for item in project_store.project().tasks if item.id == "analysis")
+    assert task.assignees == ["Pavel"]
+
+    result, changes = _execute_tool(
+        project_store,
+        "change_assignees",
+        {"task_id": "analysis", "action": "remove", "people": ["Pavel"]},
+    )
+    assert result == {"error": "A task must keep at least one assignee"}
+    assert not changes
+
+
+def test_batch_update_changes_many_tasks_in_one_tool_call():
+    project_store = ProjectStore()
+    _result, changes = _execute_tool(
+        project_store,
+        "batch_update_tasks",
+        {
+            "updates": [
+                {"task_id": "analysis", "description": "Updated analysis"},
+                {"task_id": "screen", "description": "Updated screening"},
+            ]
+        },
+    )
+
+    assert {change.task_id for change in changes} == {"analysis", "screen"}
+    snapshots = {task.id: task for task in project_store.snapshot.tasks}
+    assert snapshots["analysis"].description == "Updated analysis"
+    assert snapshots["screen"].description == "Updated screening"
