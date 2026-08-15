@@ -169,3 +169,73 @@ def test_batch_update_changes_many_tasks_in_one_tool_call():
     snapshots = {task.id: task for task in project_store.snapshot.tasks}
     assert snapshots["analysis"].description == "Updated analysis"
     assert snapshots["screen"].description == "Updated screening"
+
+
+def test_agent_defers_tool_calls_above_round_limit_and_continues(monkeypatch):
+    project_store = ProjectStore()
+    task_ids = [task.id for task in project_store.snapshot.tasks]
+
+    def calls(ids, offset=0):
+        return [
+            {
+                "index": index,
+                "id": f"call-{offset + index}",
+                "type": "function",
+                "function": {
+                    "name": "update_task",
+                    "arguments": json.dumps(
+                        {"task_id": task_id, "description": f"bulk-{offset + index}"}
+                    ),
+                },
+            }
+            for index, task_id in enumerate(ids)
+        ]
+
+    responses = iter(
+        [
+            {
+                "model": "qwen/qwen3.7-flash",
+                "choices": [
+                    {"message": {"role": "assistant", "content": "", "tool_calls": calls(task_ids)}}
+                ],
+                "usage": {},
+            },
+            {
+                "model": "qwen/qwen3.7-flash",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": calls(task_ids[10:], 10),
+                        }
+                    }
+                ],
+                "usage": {},
+            },
+            {
+                "model": "qwen/qwen3.7-flash",
+                "choices": [{"message": {"role": "assistant", "content": "Done."}}],
+                "usage": {},
+            },
+        ]
+    )
+    requests = []
+
+    def fake_stream(*_args, **kwargs):
+        requests.append(kwargs["json"])
+        return FakeResponse(next(responses))
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test")
+    monkeypatch.setenv("AGENT_MAX_TOOL_CALLS_PER_ROUND", "10")
+    monkeypatch.setattr("backend.agent.httpx.stream", fake_stream)
+
+    reply, changes, _usage = run_agent(project_store, "Update every task")
+
+    assert reply == "Done."
+    assert len(changes) == 12
+    assert json.loads(requests[1]["messages"][-1]["content"])["deferred"] is True
+    assert "bulk-0" in requests[1]["messages"][0]["content"]
+    assert [task.description for task in project_store.snapshot.tasks] == [
+        f"bulk-{index}" for index in range(12)
+    ]
