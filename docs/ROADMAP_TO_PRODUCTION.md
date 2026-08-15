@@ -24,7 +24,7 @@ Risk: concurrent updates currently overwrite process memory and disappear on res
 
 ## P1 — real AI and MCP safety
 
-1. Replace the mock parser with an OpenRouter adapter selected by environment.
+1. Persist multi-turn agent conversation state and tool-call audit records.
 2. Give the model read-only project context and strict, narrow MCP tool schemas; retain deterministic scheduling.
 3. Add confirmation for destructive, bulk, or ambiguous changes and show a proposed diff before commit.
 4. Version prompts and schemas; trace latency and tool outcomes without storing hidden reasoning.

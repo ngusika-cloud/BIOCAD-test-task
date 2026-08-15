@@ -1,6 +1,6 @@
-# PlanPilot
+# BIOCAD Gantt chart
 
-PlanPilot is a desktop-first planning workspace for biotech teams. It combines an interactive Gantt chart with natural-language plan editing, validated Excel import/export, task details, and one-step undo. This milestone uses a deterministic mock assistant; no LLM key is required.
+BIOCAD Gantt chart is a desktop-first planning workspace for biotech teams. It combines an interactive Gantt chart with natural-language plan editing, validated Excel import/export, multilingual task details, categorical team assignment, and man-hour calculation. Its LangGraph ReAct agent uses Qwen3.7 Flash through OpenRouter.
 
 ## What works
 
@@ -8,8 +8,9 @@ PlanPilot is a desktop-first planning workspace for biotech teams. It combines a
 - Interactive [SVAR React Gantt](https://svar.dev/react/gantt/) (MIT open-source edition)
 - Task selection, details editing, dependency validation, and deletion
 - Excel preview, validation, confirmation, export, and round-trip support
-- Mock chat commands for assignment, moves, new tasks, dependencies, and bulk moves
-- One-step undo and seed reset
+- ReAct planning agent with clarification questions, streamed replies, conversation history, and validated planning tools
+- Per-run input/output token counts and actual OpenRouter cost reporting
+- Seed reset
 - FastAPI REST API and a stdio MCP server sharing the same store and scheduler
 
 Example commands: Assign Hit analysis to Elena; Move Primary screening by 3 days; Add a 3-day QA task after Lead selection; Make Candidate review depend on QA; Move all of Anna's tasks by one week.
@@ -50,7 +51,9 @@ flowchart TD
     UI[React application] --> Gantt[SVAR Gantt]
     UI -->|REST API| Routes[FastAPI routes]
     MCP[MCP stdio tools] --> Services[Shared project services]
-    Routes --> Services
+    Routes --> Agent[LangGraph ReAct agent]
+    Agent -->|Qwen3.7 Flash| OpenRouter[OpenRouter]
+    Agent --> Services
     Services --> Validation[Task and dependency validation]
     Validation --> Scheduler[Deterministic scheduler]
     Scheduler --> Store[In-memory project store]
@@ -63,35 +66,31 @@ Data is intentionally in memory for the demo. Restarting the backend restores th
 
 ## Excel format
 
-The first row must contain task, description, executor, duration, and predecessors. Predecessors are comma-separated task names. Names must be unique; durations are whole days. See [sample/planpilot-sample.xlsx](sample/planpilot-sample.xlsx).
+The first row must contain task, description, executor, duration, and predecessors. Executors are comma- or semicolon-separated team members, and predecessors are comma-separated task names. Names must be unique; durations are whole days. See [sample/planpilot-sample.xlsx](sample/planpilot-sample.xlsx).
 
 ## API and MCP
 
-REST includes health, project read/reset/undo, task create/update/delete, import preview/confirm, export, and mock chat. Interactive API docs are at http://localhost:8000/docs.
+REST includes health, project read/reset, task create/update/delete, import preview/confirm, export, agent configuration, regular chat, and SSE streaming chat. Interactive API docs are at http://localhost:8000/docs.
 
 Start MCP with:
 
     cd backend
     uv run python -m backend.mcp_server
 
-Tools: get_project_state, get_tasks, add_task, update_task, move_task, change_assignee, set_dependencies, and delete_task. They reuse the same business operations as REST.
+Tools: get_project_state, get_tasks, add_task, update_task, move_task, change_assignees, set_dependencies, and delete_task. They reuse the same business operations as REST.
 
 ## Environment
 
-No environment variables are required in mock mode. .env.example reserves OPENROUTER_API_KEY and OPENROUTER_MODEL for the next milestone. VITE_API_URL may point the frontend at a separately hosted API.
+Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`. The default model is `qwen/qwen3.7-flash`; override it with `OPENROUTER_MODEL`. On Render, configure both values on the backend service. `VITE_API_URL` may point the frontend at a separately hosted API.
 
 ## Key decisions
 
 - SVAR provides a maintained React-native Gantt instead of a custom timeline.
-- Chat chrome is local because the product needs compact, domain-specific change cards; assistant behavior stays behind one API.
+- Chat chrome is local because the product needs compact, domain-specific change and usage cards; assistant behavior stays behind one API.
 - Import is two-phase so users inspect a validated replacement before committing.
 - Internal IDs are stable; Excel translates predecessor names only at the boundary.
-- One-step snapshot undo is enough for the demo and exposes a clear path to revision history.
-
-## AI-assisted development
-
-Codex was used to interpret the brief, compare the current SVAR package/API, scaffold the React/FastAPI implementation, and create tests. Package choices were checked against official documentation. All generated behavior was verified with a TypeScript production build, backend tests, and API smoke checks; AI output was not accepted as a substitute for those checks.
+- OpenRouter's returned usage cost is displayed directly; token-price calculation is only a fallback when a provider omits cost.
 
 ## Current limits
 
-Mock intent parsing accepts fixed English command shapes and is not an LLM. State is process-local, dates use calendar days, task bar drag editing is not persisted, and there is no authentication or collaboration. See [Roadmap to production](docs/ROADMAP_TO_PRODUCTION.md).
+State is process-local, dates use calendar days, task bar drag editing is not persisted, agent conversation history is request-local, and there is no authentication or collaboration. See [Roadmap to production](docs/ROADMAP_TO_PRODUCTION.md).
