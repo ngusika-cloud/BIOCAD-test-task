@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+from unicodedata import normalize
 from uuid import uuid4
 
 from openpyxl import Workbook, load_workbook
@@ -10,7 +11,17 @@ from backend.scheduler import PlanValidationError, schedule
 
 HEADERS = ["task", "description", "executor", "duration", "predecessors"]
 RUSSIAN_HEADERS = ["задача", "описание", "исполнитель", "длительность", "предшественники"]
-HEADER_ALIASES = dict(zip(RUSSIAN_HEADERS, HEADERS))
+HEADER_ALIASES = {
+    **dict(zip(RUSSIAN_HEADERS, HEADERS)),
+    "описания": "description",
+    "исполнители": "executor",
+    "длительности": "duration",
+    "предшественник": "predecessors",
+    "descriptions": "description",
+    "executors": "executor",
+    "durations": "duration",
+    "predecessor": "predecessors",
+}
 RUSSIAN_ASSIGNEES = {
     "Anna": "Анна",
     "Elena": "Елена",
@@ -23,6 +34,12 @@ ASSIGNEE_ALIASES = {
 }
 
 
+def canonical_header(value: object) -> str:
+    header = normalize("NFKC", str(value or "")).replace("\ufeff", "").replace("\xa0", " ")
+    header = " ".join(header.split()).casefold()
+    return HEADER_ALIASES.get(header, header)
+
+
 def parse_excel(content: bytes, project_name: str, start_date) -> ProjectSnapshot:
     try:
         sheet = load_workbook(BytesIO(content), read_only=True, data_only=True).active
@@ -31,10 +48,7 @@ def parse_excel(content: bytes, project_name: str, start_date) -> ProjectSnapsho
     rows = list(sheet.iter_rows(values_only=True))
     if not rows:
         raise PlanValidationError("The workbook is empty")
-    actual = [
-        HEADER_ALIASES.get(str(value or "").strip().casefold(), str(value or "").strip().casefold())
-        for value in rows[0]
-    ]
+    actual = [canonical_header(value) for value in rows[0]]
     missing = [header for header in HEADERS if header not in actual]
     if missing:
         raise PlanValidationError(f"Missing columns: {', '.join(missing)}")
