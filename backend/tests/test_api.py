@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 import backend.main as main_module
 from backend.main import app
-from backend.models import AgentUsage, Change, TaskUpdate
+from backend.models import AgentUsage, Change, TaskCreate, TaskUpdate
 from backend.seed import seed_snapshot
 from backend.store import store
 
@@ -18,6 +18,31 @@ def setup_function():
 def test_health_and_seed():
     assert client.get("/health").json() == {"status": "ok"}
     assert len(client.get("/api/project").json()["tasks"]) == 12
+
+
+def test_delete_isolated_task():
+    store.add(
+        TaskCreate(
+            id="isolated",
+            name="Isolated task",
+            assignees=["Anna"],
+            duration=1,
+        )
+    )
+
+    response = client.delete("/api/tasks/isolated")
+
+    assert response.status_code == 200
+    assert all(task["id"] != "isolated" for task in response.json()["tasks"])
+
+
+def test_delete_task_removes_links_from_dependent_tasks():
+    response = client.delete("/api/tasks/analysis")
+
+    assert response.status_code == 200
+    tasks = response.json()["tasks"]
+    assert all(task["id"] != "analysis" for task in tasks)
+    assert all("analysis" not in task["predecessor_ids"] for task in tasks)
 
 
 def test_agent_chat_response(monkeypatch):

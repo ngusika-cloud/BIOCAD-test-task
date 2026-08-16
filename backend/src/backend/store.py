@@ -46,9 +46,19 @@ class ProjectStore:
         candidate = deepcopy(self.snapshot)
         if not any(task.id == task_id for task in candidate.tasks):
             raise KeyError(task_id)
-        if any(task_id in task.predecessor_ids for task in candidate.tasks):
-            raise PlanValidationError("Remove dependent links before deleting this task")
-        candidate.tasks = [task for task in candidate.tasks if task.id != task_id]
+        candidate.tasks = [
+            task.model_copy(
+                update={
+                    "predecessor_ids": [
+                        predecessor_id
+                        for predecessor_id in task.predecessor_ids
+                        if predecessor_id != task_id
+                    ]
+                }
+            )
+            for task in candidate.tasks
+            if task.id != task_id
+        ]
         return self.replace(candidate)
 
     def reset(self) -> Project:
