@@ -24,7 +24,7 @@ npm ci
 npm run dev
 ```
 
-Приложение откроется на http://localhost:5173, документация API доступна на http://localhost:8000/docs. В dev-режиме Vite перенаправляет запросы `/api` и `/health` на backend.
+Приложение откроется на [http://localhost:5173](http://localhost:5173), документация API доступна на [http://localhost:8000/docs](http://localhost:8000/docs). В dev-режиме Vite перенаправляет запросы `/api` и `/health` на backend.
 
 Опубликованный сайт размещён на Render. Из России и Render, и сайт доступны только через VPN.
 
@@ -32,15 +32,19 @@ npm run dev
 
 Скопируйте `.env.example` в корневой `.env`. Этот файл не должен попадать в Git. Если frontend размещён отдельно, задайте переменную Vite в `frontend/.env.local`.
 
-| Переменная | Назначение | Значение по умолчанию |
-| --- | --- | --- |
-| `OPENROUTER_API_KEY` | Ключ OpenRouter, нужен только для AI-ассистента | не задано |
-| `OPENROUTER_MODEL` | Модель ассистента | `qwen/qwen3.7-flash` |
-| `OPENROUTER_SITE_URL` | HTTP Referer для OpenRouter | URL опубликованного приложения |
-| `AGENT_MAX_TOOL_CALLS_PER_ROUND` | Максимум операций в одном пакете агента | `10` |
-| `AGENT_RECURSION_LIMIT` | Общий предел шагов графа агента | `50` |
-| `CORS_ORIGINS` | Разрешённые origins через запятую | `http://localhost:5173` |
-| `VITE_API_URL` | Адрес API в `frontend/.env.local` для отдельно размещённого frontend | пусто, используются относительные URL |
+
+| Переменная                       | Назначение                                                           | Значение по умолчанию                 |
+| -------------------------------- | -------------------------------------------------------------------- | ------------------------------------- |
+| `OPENROUTER_API_KEY`             | Ключ OpenRouter, нужен только для AI-ассистента                      | не задано                             |
+| `OPENROUTER_MODEL`               | Модель ассистента                                                    | `qwen/qwen3.7-flash`                  |
+| `OPENROUTER_SITE_URL`            | HTTP Referer для OpenRouter                                          | URL опубликованного приложения        |
+| `AGENT_MAX_TOOL_CALLS_PER_ROUND` | Максимум операций в одном пакете агента                              | `10`                                  |
+| `AGENT_RECURSION_LIMIT`          | Общий предел шагов графа агента                                      | `50`                                  |
+| `CORS_ORIGINS`                   | Разрешённые origins через запятую                                    | `http://localhost:5173`               |
+| `VITE_API_URL`                   | Адрес API в `frontend/.env.local` для отдельно размещённого frontend | пусто, используются относительные URL |
+
+
+
 
 ## Проверки и воспроизводимость
 
@@ -76,6 +80,8 @@ flowchart LR
     Scheduler --> Store[(In-memory store)]
 ```
 
+
+
 - Frontend собран на React 19, TypeScript, Vite и SVAR React Gantt. Он работает с backend через REST API, а ответы ассистента получает по SSE.
 - Backend использует FastAPI, Pydantic и Uvicorn. REST API и stdio MCP-сервер вызывают одни и те же операции над проектом.
 - Планировщик проверяет уникальность задач, ссылки и циклы, затем рассчитывает даты и человеко-часы. Эти расчёты детерминированы: LLM в них не участвует.
@@ -86,7 +92,7 @@ flowchart LR
 
 ## Как я использовал AI при разработке
 
-AI был моим рабочим инструментом на всём цикле, но не источником кода, который можно принимать без проверки.
+AI был моим рабочим инструментом на всём цикле.
 
 - Вместе с ассистентом я разложил задание на пользовательские сценарии, компоненты и критерии готовности. Результат записан в [docs/task-tech.md](docs/task-tech.md).
 - С его помощью исследовал готовые решения и спроектировал связку React, FastAPI, SVAR Gantt, MCP и OpenRouter. Расчёт расписания и проверка изменений при этом остались на детерминированном backend.
