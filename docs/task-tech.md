@@ -1,297 +1,169 @@
-# BIOCAD Test Task — Thesis Plan
+# Декомпозиция тестового задания BIOCAD Gantt chart
 
-## 1. Fix the product
-- Working name: **PlanPilot**
-- Gantt — the main working screen
-- AI chat — a way to manage the plan in natural language
-- Main flow:
-  - open the app
-  - see the seed Gantt
-  - upload Excel
-  - modify the plan via AI
-  - see the changes immediately in the Gantt
-  - open the task
-  - export Excel
-- Do not add features outside the core flow unless necessary
+## 1. Цель и границы задачи
 
-## 2. Set up the project skeleton
-- `frontend/` — React + TypeScript
-- `backend/` — Python + FastAPI
-- `sample/` — test Excel
-- `docs/`
-- `README.md`
-- `docs/ROADMAP_TO_PRODUCTION.md`
-- `.env.example`
-- Set up Git
-- Store OpenRouter key only on the backend
+Нужно создать и опубликовать веб-приложение, в котором пользователь управляет проектным планом через диаграмму Ганта, Excel и AI-ассистента. Основной проверяемый сценарий:
 
-## 3. Create the data model
-- `Project`
-- `Task`: id, name, description, assignee, duration, predecessor_ids, start_date, end_date
-- Use internal IDs, not task names
+1. Пользователь открывает приложение и сразу видит план с тестовыми данными.
+2. Загружает собственный Excel со списком задач либо продолжает работать с демонстрационным планом.
+3. Массово изменяет задачи на естественном языке: переносит сроки, меняет зависимости, добавляет задачи и перераспределяет исполнителей.
+4. Сразу видит валидированный результат на диаграмме Ганта.
+5. Открывает карточку отдельной задачи и при необходимости редактирует её вручную.
+6. Экспортирует актуальный план обратно в Excel.
 
-## 4. Implement the scheduler
-- Project start date
-- Tasks without predecessors start from the project start
-- Tasks with predecessors start after the dependencies are completed
-- Calendar days for MVP
-- Checks: unknown predecessor, self-dependency, circular dependency
-- Scheduler is deterministic
-- LLM does not calculate dates on its own
+В обязательный scope входят React, FastAPI, MCP и вызов LLM через API. В прототип не входят функции, без которых нельзя продемонстрировать этот путь: полноценная корпоративная авторизация, постоянная база данных, совместное редактирование и управление портфелем проектов. Их развитие описано в [Roadmap to Production](ROADMAP_TO_PRODUCTION.md).
 
-## 5. Create seed data
-- 10–15 realistic tasks
-- 4–5 performers
-- Several parallel branches and dependency chains
-- The seed should look good on the Gantt chart and be suitable for the AI demo
+## 2. Декомпозиция требований
 
-## 6. Create a backend API without AI
-- `GET /health`
-- `GET /api/project`
-- CRUD tasks
-- reset seed
-- import Excel
-- export Excel
-- undo
-- Backend — source of truth
-- REST and MCP use the same business logic
+| Блок | Требование задания | Техническое решение | Критерий приёмки |
+| --- | --- | --- | --- |
+| Начальное состояние | При открытии страницы видны тестовые данные | Реалистичный seed-проект создаётся backend и загружается frontend | После запуска без дополнительных действий отображаются задачи и связи |
+| Диаграмма Ганта | План интерактивен | React + TypeScript + готовая библиотека SVAR React Gantt | Работают выбор задачи, прокрутка, масштабы и отображение зависимостей |
+| Карточка задачи | По клику открываются детали | Модальное окно с названием, описанием, исполнителями, длительностью, датами и зависимостями | Изменение проходит backend-валидацию и сразу обновляет Gantt |
+| Импорт Excel | Можно загрузить список задач заданного формата | Двухэтапный import: preview с ошибками, затем confirm | Валидный файл заменяет текущий план; невалидный не меняет состояние |
+| Экспорт Excel | План можно скачать | Backend формирует `.xlsx` из актуального состояния | Экспортированный файл повторно импортируется без потери данных |
+| AI-чат | План массово меняется естественным языком | FastAPI вызывает LLM через OpenRouter; LangGraph-агент использует типизированные операции | Поддержаны перенос, добавление, удаление, зависимости и перераспределение исполнителей |
+| Мгновенная обратная связь | Изменения агента сразу видны | Ответ передаётся через SSE, после мутаций frontend получает новое состояние | Пользователь видит потоковый ответ и обновлённый план без перезагрузки страницы |
+| MCP | Обязателен MCP-интерфейс | Отдельный stdio MCP-сервер вызывает тот же слой операций, что и REST | MCP и REST применяют одинаковые правила и возвращают согласованное состояние |
+| Поставка | Нужны репозиторий и публичное приложение | Раздельные React static site и FastAPI service на Render | Публичный frontend обращается к backend без CORS-ошибок |
+| Материалы | Нужны README, пример Excel, demo и production roadmap | Документация в `README.md` и `docs/`, файлы в `sample/` | Проверяющий может запустить и оценить решение без устных пояснений |
 
-## 7. Create a Gantt UI
-- React Gantt library, don’t write the Gantt from scratch
-- Timeline, task bars, task names, selected/hover states
-- Dependency lines, if the library supports them
-- Horizontal scroll
-- Click on a task → modal/drawer
+## 3. Модель данных и правила планирования
 
-## 8. Create a Task Modal
-- Name
-- Description
-- Assigned to
-- Duration
-- Start / End
-- Predecessors
-- Editing
-- After the change → backend validation → scheduler → Gantt update
+### Проект
 
-## 9. Perform Excel Import
-Required columns:
-- `task`
-- `description`
-- `executor`
-- `duration`
-- `predecessors`
+- название и дата начала;
+- список задач;
+- фиксированный справочник доступных исполнителей;
+- версия состояния для согласованного обновления интерфейса.
 
-Check:
-- missing columns
-- empty task name
-- duplicate names
-- invalid duration
-- unknown predecessor
-- self-dependency
-- cycle
+### Задача
 
-UX:
-- select a file
-- show preview
-- confirm import
-- replace the current project
-- show errors in clear language
+- стабильный внутренний `id`;
+- название и описание;
+- один или несколько исполнителей как категориальные значения из справочника;
+- длительность;
+- список `predecessor_ids`;
+- рассчитанные даты начала и окончания;
+- суммарные человеко-часы.
 
-## 10. Create an Excel Export
-- Export the current project state
-- The same required columns
-- Internal predecessor IDs → task names
-- Check the round‑trip: import → change → export → re‑import
+Названия используются для отображения и Excel, но связи внутри приложения строятся по идентификаторам. Даты рассчитывает детерминированный scheduler, а не LLM:
 
-## 11. Connect MCP
-Main tools:
-- `get_project_state`
-- `get_tasks`
-- `add_task`
-- `update_task`
-- `move_task`
-- `change_assignee`
-- `set_dependencies`
-- `delete_task`
+- задача без предшественников начинается от даты проекта с учётом заданного смещения;
+- зависимая задача начинается после завершения всех предшественников;
+- изменение длительности или зависимости пересчитывает затронутую цепочку;
+- неизвестная задача, ссылка на себя, дубли и циклическая зависимость отклоняются;
+- для прототипа используются календарные дни и одинаковая норма восемь часов в день на каждого исполнителя.
 
-Rules:
-- strict schemas
-- all mutations go through backend validation
-- MCP uses the same business logic as REST
-- no unrestricted `edit_project`
+Такое разделение оставляет модели интерпретацию намерения пользователя, но не доверяет ей бизнес-расчёты и целостность проекта.
 
-## 12. Connect OpenRouter
-- API key only for backend
-- Model via env
-- FastAPI calls OpenRouter
-- LLM understands the intent, receives the project context, calls MCP tools, and briefly reports the result
-- LLM does not modify the state directly
+## 4. Архитектурная декомпозиция
 
-## 13. Debug AI happy paths
-Check:
-- `Assign Backend API to Anna`
-- `Move Backend API by 3 days`
-- `Add a 3‑day QA task after Backend API`
-- `Make Launch depend on QA`
-- `Move all of Anna's tasks by one week`
-- multi‑step instruction
-- invalid/circular dependency
+### Frontend
 
-## 14. Create a good AI UX
-- Empty state with command examples
-- Loading: `Understanding your request…` → `Updating project…`
-- After the operation, show how many tasks have changed and what exactly has changed
-- Briefly highlight the changed tasks on the Gantt
-- Do not show raw reasoning / tool internals
+- загрузка текущего проекта через REST;
+- Gantt с масштабами week, month и quarter, переходом к текущей дате и визуальным выделением изменений;
+- модальное редактирование задачи и выбор нескольких исполнителей из списка;
+- preview и подтверждение Excel import, скачивание export;
+- изменяемая ширина панели AI-чата, очистка истории и локализация интерфейса;
+- SSE-клиент для streaming, отображения модели, токенов и стоимости вызова.
 
-## 15. Add Undo
-- Save `before_state` before the AI mutation
-- After a successful operation, save the changeset
-- Show `Undo` in the chat
-- Minimum one-step undo
-- Use as a trust mechanism for bulk AI actions
+### Backend
 
-## 16. Handle errors
-- OpenRouter failure
-- Model timeout
-- Invalid tool call
-- Invalid Excel
-- Unknown task / no matching tasks
-- Circular dependency
-- Invalid duration
-- Backend failure
-- Do not show the stack trace to the user
+- Pydantic-контракты и FastAPI endpoints для проекта, задач, импорта, экспорта и чата;
+- in-memory repository как сознательное ограничение прототипа;
+- единый сервис операций над проектом;
+- scheduler и атомарная валидация нового снимка до сохранения;
+- Excel-адаптер для преобразования внешних названий в внутренние ID и обратно;
+- CORS-конфигурация для раздельного размещения frontend и backend.
 
-## 17. Perform UI polish
-- Desktop-first
-- Gantt ~70–75%
-- Chat ~25–30%
-- Consistent spacing / typography / buttons
-- Calm SaaS-style
-- No unnecessary AI gradients / robot visuals
-- Check 13–16" screen
-- Basic mobile fallback
+### AI и MCP
 
-## 18. Run tests
-Backend:
-- scheduler
-- cycles
-- Excel parser
-- mutations
-- dependency propagation
-- MCP validation
+- ключ OpenRouter хранится только на backend, модель и лимиты задаются через environment variables;
+- system prompt хранится в версионируемом Jinja2-шаблоне;
+- агент получает актуальный контекст проекта, задаёт уточняющий вопрос при неоднозначности и отвечает кратко;
+- изменения выполняются только через типизированные tools, включая пакетные операции;
+- количество вызовов ограничено на один раунд, а большой набор операций продолжается следующими пакетами;
+- MCP-сервер публикует чтение проекта и безопасные операции добавления, изменения, переноса, назначения исполнителей, зависимостей и удаления;
+- REST, AI tools и MCP не дублируют бизнес-правила, а используют общий слой сервисов.
 
-AI:
-- 15–20 fixed prompts
-- expected tool
-- expected state change
-- pass/fail
+## 5. План реализации вертикальными этапами
 
-## 19. Verify end-to-end scenario
-- open deployed app
-- seed Gantt loaded
-- import sample Excel
-- bulk edit via AI
-- add task/dependency via AI
-- open task modal
-- undo
-- export Excel
-- re-import export
-- everything works without localhost
+### Этап 1. Каркас и воспроизводимость
 
-## 20. Prepare the README
-- product description
-- live demo
-- demo video/gif
-- key features
-- architecture
-- MCP tools
-- scheduling assumptions
-- Excel format
-- local run
-- env variables
-- deployment
-- product/technical decisions
-- AI-assisted development
-- limitations
-- link to Roadmap to Production
+Создать `frontend/`, `backend/`, `docs/` и `sample/`; настроить React/Vite, FastAPI, `uv`, lock-файлы, Ruff и pre-commit. Результат этапа — локально запускаемые приложения и успешный `/health`.
 
-## 21. Prepare the Roadmap to Production
-### P0 — Reliability
-- PostgreSQL
-- persistence
-- transactions
-- revision history
-- backups
+### Этап 2. Предметная модель и scheduler
 
-### P1 — Security
-- auth
-- RBAC
-- SSO
-- rate limits
-- secret management
-- audit log
+Реализовать модели проекта и задач, seed, repository, проверки графа зависимостей и расчёт дат/человеко-часов. До подключения UI покрыть scheduler unit-тестами, включая параллельные ветви и циклы.
 
-### P1 — AI Quality
-- regression evals
-- prompt versioning
-- tracing
-- model fallback
-- cost/latency monitoring
-- confirmations for risky actions
+### Этап 3. Базовый API и Gantt
 
-### P2+
-- collaboration
-- large-project scalability
-- Jira / Linear / Sheets integrations
+Добавить получение проекта и CRUD задач, подключить Gantt, карточку задачи и ручное редактирование. Результат — полностью рабочий сценарий без Excel и AI.
 
-## 22. Create a demo video
-Scenario:
-1. open the app
-2. show the seed Gantt
-3. import Excel
-4. perform bulk AI edit
-5. add a task via AI
-6. show the updated Gantt
-7. open the task modal
-8. export Excel
+### Этап 4. Excel round-trip
 
-Goal: 60–90 seconds.
+Реализовать preview/confirm import, понятные ошибки и export. Проверить цепочку `import → изменение → export → повторный import` на нескольких файлах разной длины.
 
-## 23. Prepare the protection
-Structure:
-1. Problem
-2. Product concept
-3. Live demo
-4. UX decisions
-5. Architecture
-6. Why MCP
-7. Guardrails / reliability
-8. Trade-offs
-9. Roadmap to Production
-10. Metrics / next steps
+### Этап 5. MCP и AI-операции
 
-Prepare answers:
-- Why MCP?
-- Why this model?
-- What if the LLM makes a mistake?
-- What if the query is ambiguous?
-- How are cycles prevented?
-- Why is the scheduler deterministic?
-- Why is there Undo?
-- Why no database/auth?
-- How was the AI tested?
-- How to get it to production?
+Вынести операции над проектом в общий сервис, опубликовать MCP tools и подключить OpenRouter-агента. Проверить одиночные, массовые и многошаговые команды, а также запросы, требующие уточнения.
 
-## 24. Final readiness criterion
-The project is ready if the reviewer, without your help, can:
-- open the public URL
-- understand the product
-- see the Gantt chart
-- import Excel
-- change the plan via AI
-- understand what has changed
-- undo a change
-- open a task
-- export a new Excel
-- understand the architecture and limitations from the README
+### Этап 6. Потоковый UX и защита от ошибок
+
+Добавить SSE streaming, историю и очистку чата, отображение usage/cost, подсветку изменённых задач, batch processing и обработку timeout, ошибочного tool call и недоступности провайдера без показа stack trace.
+
+### Этап 7. Deployment и сквозная проверка
+
+Разместить frontend и backend, настроить `VITE_API_URL`, secrets и CORS. Повторить основной сценарий на публичном URL, а не только через localhost.
+
+### Этап 8. Передача результата
+
+Подготовить README, пример Excel, короткое demo-видео или GIF и Roadmap to Production. Проверить ссылки, команды запуска и отсутствие секретов в репозитории.
+
+## 6. Стратегия проверки
+
+### Автоматические проверки backend
+
+- расчёт расписания и распространение изменений по зависимостям;
+- неизвестные зависимости, self-dependency и циклы;
+- CRUD и атомарность невалидных изменений;
+- несколько исполнителей и человеко-часы;
+- Excel validation и round-trip;
+- agent tools, batch operations, continuation после лимита раунда;
+- формат SSE, usage и ошибки OpenRouter на mock-ответах;
+- одинаковое поведение REST- и MCP-операций.
+
+### Проверки frontend
+
+- TypeScript compilation и production build;
+- корректное отображение seed и импортированного проекта;
+- week/month/quarter, Today, task modal и изменение ширины чата;
+- обновление диаграммы после ручной и AI-операции;
+- русская и английская локализация;
+- понятные loading, empty и error states.
+
+### Ручной end-to-end сценарий
+
+1. Открыть публичное приложение и проверить seed Gantt.
+2. Импортировать пример Excel через preview и confirm.
+3. Попросить AI массово изменить исполнителей и сроки.
+4. Добавить задачу с зависимостью и проверить пересчёт плана.
+5. Открыть задачу и проверить детали вручную.
+6. Экспортировать Excel и повторно импортировать результат.
+7. Убедиться, что чат показывает модель, токены и стоимость, а интерфейс работает без перезагрузки.
+
+## 7. Definition of Done
+
+Задание считается выполненным, если проверяющий без помощи автора может:
+
+- открыть опубликованное приложение и понять его назначение;
+- увидеть и исследовать seed Gantt;
+- импортировать корректный Excel и получить понятное объяснение ошибок некорректного файла;
+- изменить несколько задач через естественный язык и сразу увидеть результат;
+- получить уточняющий вопрос вместо произвольного изменения при неоднозначной команде;
+- открыть и отредактировать отдельную задачу;
+- экспортировать пригодный для повторного импорта Excel;
+- запустить проект локально по README;
+- понять архитектуру, роль MCP, применение AI и ограничения прототипа;
+- найти в репозитории пример Excel, демонстрацию и план доведения решения до production.
