@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from backend.agent import _execute_tool, run_agent
+from backend.agent import AgentError, _execute_tool, run_agent
 from backend.models import ChatMessage
 from backend.store import ProjectStore
 
@@ -11,6 +11,7 @@ class FakeResponse:
     def __init__(self, payload):
         self.payload = payload
         self.text = ""
+        self.status_code = 200
 
     def raise_for_status(self):
         return None
@@ -27,6 +28,24 @@ class FakeResponse:
         chunk = {**self.payload, "choices": [{"delta": delta}]}
         yield f"data: {json.dumps(chunk)}"
         yield "data: [DONE]"
+
+
+class FakeErrorResponse:
+    status_code = 400
+    text = '{"error":{"message":"Reasoning cannot be disabled."}}'
+    reason_phrase = "Bad Request"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def read(self):
+        return self.text.encode()
+
+    def json(self):
+        return json.loads(self.text)
 
 
 def test_react_agent_executes_tool_and_accumulates_usage(monkeypatch):
@@ -120,8 +139,60 @@ def test_agent_sends_history_and_streams_reply(monkeypatch):
     assert not changes
     assert tokens == ["Which task?"]
     assert captured["stream"] is True
+    assert "temperature" not in captured
+    assert captured["reasoning"] == {"effort": "low", "exclude": True}
     assert captured["messages"][-3]["content"] == "I need to move a task"
     assert "ask one focused clarification" in captured["messages"][0]["content"]
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "google/gemini-3.7-flash",
+        "qwen/qwen3.8-max",
+        "deepseek/deepseek-v4-flash-0731",
+        "openai/gpt-5.6-luna",
+    ],
+)
+def test_agent_uses_portable_parameters_for_supported_models(monkeypatch, model):
+    captured = {}
+    payload = {
+        "model": model,
+        "choices": [{"message": {"role": "assistant", "content": "Ready."}}],
+        "usage": {},
+    }
+
+    def fake_stream(*_args, **kwargs):
+        captured.update(kwargs["json"])
+        return FakeResponse(payload)
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test")
+    monkeypatch.setenv("OPENROUTER_MODEL", model)
+    monkeypatch.setattr("backend.agent.httpx.stream", fake_stream)
+
+    _reply, _changes, usage = run_agent(ProjectStore(), "Describe the plan")
+
+    assert captured["model"] == model
+    assert captured["tool_choice"] == "auto"
+    assert captured["stream"] is True
+    assert "temperature" not in captured
+    assert captured["reasoning"] == {"effort": "low", "exclude": True}
+    assert usage.model == model
+
+
+def test_agent_reports_openrouter_error_detail(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test")
+    monkeypatch.setenv("OPENROUTER_MODEL", "google/gemini-3.7-flash")
+    monkeypatch.setattr("backend.agent.httpx.stream", lambda *_args, **_kwargs: FakeErrorResponse())
+
+    with pytest.raises(
+        AgentError,
+        match=(
+            r"google/gemini-3\.7-flash \(400\): "
+            r"Reasoning cannot be disabled\."
+        ),
+    ):
+        run_agent(ProjectStore(), "Describe the plan")
 
 
 def test_assignees_can_be_added_and_removed_without_replacing_others():

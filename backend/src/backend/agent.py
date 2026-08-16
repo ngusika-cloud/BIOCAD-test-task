@@ -70,6 +70,16 @@ def _estimated_cost(prompt_tokens: int, completion_tokens: int) -> float:
     return (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
 
 
+def _openrouter_error_message(response: httpx.Response) -> str:
+    try:
+        response.read()
+        payload = response.json()
+        error = payload.get("error") or {}
+        return error.get("message") or error.get("code") or response.text
+    except (ValueError, httpx.HTTPError):
+        return response.text or response.reason_phrase
+
+
 TOOLS = [
     {
         "type": "function",
@@ -441,14 +451,18 @@ def run_agent(
                     "messages": messages,
                     "tools": TOOLS,
                     "tool_choice": "auto",
-                    "temperature": 0.1,
-                    "reasoning": {"effort": "none", "exclude": True},
+                    "reasoning": {"effort": "low", "exclude": True},
                     "stream": True,
                     "stream_options": {"include_usage": True},
                 },
                 timeout=90,
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    detail = _openrouter_error_message(response)
+                    raise AgentError(
+                        f"OpenRouter request failed for {requested_model} "
+                        f"({response.status_code}): {detail}"
+                    )
                 content_parts: list[str] = []
                 tool_calls: dict[int, dict] = {}
                 usage: dict = {}
@@ -489,6 +503,8 @@ def run_agent(
                         function = fragment.get("function") or {}
                         target["function"]["name"] += function.get("name") or ""
                         target["function"]["arguments"] += function.get("arguments") or ""
+        except AgentError:
+            raise
         except (httpx.HTTPError, ValueError) as exc:
             raise AgentError(f"OpenRouter request failed: {exc}") from exc
 
