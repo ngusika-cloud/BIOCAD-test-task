@@ -13,9 +13,11 @@ from backend.store import ProjectStore
 SAMPLE_DIR = Path(__file__).resolve().parents[2] / "sample" / "import-tests"
 
 
-def workbook(rows, headers=None):
+def workbook(rows, headers=None, preface=None):
     book = Workbook()
     sheet = book.active
+    for row in preface or []:
+        sheet.append(row)
     sheet.append(headers or ["task", "description", "executor", "duration", "predecessors"])
     for row in rows:
         sheet.append(row)
@@ -80,6 +82,26 @@ def test_excel_normalizes_common_header_variants():
     parsed = parse_excel(data, "Импортированный проект", seed_snapshot().start_date)
 
     assert parsed.tasks[0].name == "Проверка"
+    assert parsed.tasks[0].assignees == ["Anna"]
+
+
+def test_excel_finds_descriptive_russian_headers_below_title():
+    data = workbook(
+        [["Настройка проекта", "Создать первый проект", "Анна", 2, ""]],
+        [
+            "Название задачи",
+            "Описание задачи",
+            "Ответственные",
+            "Длительность (дни)",
+            "Зависимости",
+        ],
+        preface=[["План разработки внутреннего трекера"], []],
+    )
+
+    parsed = parse_excel(data, "Импортированный проект", seed_snapshot().start_date)
+
+    assert len(parsed.tasks) == 1
+    assert parsed.tasks[0].name == "Настройка проекта"
     assert parsed.tasks[0].assignees == ["Anna"]
 
 

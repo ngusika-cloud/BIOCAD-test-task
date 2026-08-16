@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from io import BytesIO
 from unicodedata import normalize
 from uuid import uuid4
@@ -13,13 +14,33 @@ HEADERS = ["task", "description", "executor", "duration", "predecessors"]
 RUSSIAN_HEADERS = ["задача", "описание", "исполнитель", "длительность", "предшественники"]
 HEADER_ALIASES = {
     **dict(zip(RUSSIAN_HEADERS, HEADERS)),
+    "название задачи": "task",
+    "наименование задачи": "task",
+    "описание задачи": "description",
     "описания": "description",
+    "ответственный": "executor",
+    "ответственные": "executor",
+    "ответственный исполнитель": "executor",
+    "назначенные исполнители": "executor",
     "исполнители": "executor",
+    "продолжительность": "duration",
+    "длительность дни": "duration",
+    "длительность в днях": "duration",
+    "срок в днях": "duration",
     "длительности": "duration",
+    "зависимости": "predecessors",
+    "предыдущие задачи": "predecessors",
+    "предшествующие задачи": "predecessors",
+    "задачи предшественники": "predecessors",
     "предшественник": "predecessors",
+    "task name": "task",
     "descriptions": "description",
+    "assignee": "executor",
+    "assignees": "executor",
     "executors": "executor",
+    "duration days": "duration",
     "durations": "duration",
+    "dependencies": "predecessors",
     "predecessor": "predecessors",
 }
 RUSSIAN_ASSIGNEES = {
@@ -36,8 +57,23 @@ ASSIGNEE_ALIASES = {
 
 def canonical_header(value: object) -> str:
     header = normalize("NFKC", str(value or "")).replace("\ufeff", "").replace("\xa0", " ")
+    header = re.sub(r"[^\w]+", " ", header, flags=re.UNICODE)
     header = " ".join(header.split()).casefold()
     return HEADER_ALIASES.get(header, header)
+
+
+def find_header_row(rows: list[tuple], search_limit: int = 10) -> tuple[int, list[str]]:
+    best_index = 0
+    best_headers: list[str] = []
+    best_score = -1
+    for index, row in enumerate(rows[:search_limit]):
+        headers = [canonical_header(value) for value in row]
+        score = len(set(headers) & set(HEADERS))
+        if score > best_score:
+            best_index, best_headers, best_score = index, headers, score
+        if all(header in headers for header in HEADERS):
+            return index, headers
+    return best_index, best_headers
 
 
 def parse_excel(content: bytes, project_name: str, start_date) -> ProjectSnapshot:
@@ -48,13 +84,13 @@ def parse_excel(content: bytes, project_name: str, start_date) -> ProjectSnapsho
     rows = list(sheet.iter_rows(values_only=True))
     if not rows:
         raise PlanValidationError("The workbook is empty")
-    actual = [canonical_header(value) for value in rows[0]]
+    header_index, actual = find_header_row(rows)
     missing = [header for header in HEADERS if header not in actual]
     if missing:
         raise PlanValidationError(f"Missing columns: {', '.join(missing)}")
     positions = {name: actual.index(name) for name in HEADERS}
     raw = []
-    for number, row in enumerate(rows[1:], start=2):
+    for number, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
         if not any(row):
             continue
         name = str(row[positions["task"]] or "").strip()
