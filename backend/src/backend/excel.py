@@ -9,6 +9,18 @@ from backend.models import ProjectSnapshot, TaskCreate
 from backend.scheduler import PlanValidationError, schedule
 
 HEADERS = ["task", "description", "executor", "duration", "predecessors"]
+RUSSIAN_HEADERS = ["задача", "описание", "исполнитель", "длительность", "предшественники"]
+HEADER_ALIASES = dict(zip(RUSSIAN_HEADERS, HEADERS))
+RUSSIAN_ASSIGNEES = {
+    "Anna": "Анна",
+    "Elena": "Елена",
+    "Mikhail": "Михаил",
+    "Daria": "Дарья",
+    "Pavel": "Павел",
+}
+ASSIGNEE_ALIASES = {
+    localized.casefold(): canonical for canonical, localized in RUSSIAN_ASSIGNEES.items()
+}
 
 
 def parse_excel(content: bytes, project_name: str, start_date) -> ProjectSnapshot:
@@ -19,7 +31,10 @@ def parse_excel(content: bytes, project_name: str, start_date) -> ProjectSnapsho
     rows = list(sheet.iter_rows(values_only=True))
     if not rows:
         raise PlanValidationError("The workbook is empty")
-    actual = [str(value or "").strip().casefold() for value in rows[0]]
+    actual = [
+        HEADER_ALIASES.get(str(value or "").strip().casefold(), str(value or "").strip().casefold())
+        for value in rows[0]
+    ]
     missing = [header for header in HEADERS if header not in actual]
     if missing:
         raise PlanValidationError(f"Missing columns: {', '.join(missing)}")
@@ -41,7 +56,7 @@ def parse_excel(content: bytes, project_name: str, start_date) -> ProjectSnapsho
                 "name": name,
                 "description": str(row[positions["description"]] or "").strip(),
                 "assignees": [
-                    name.strip()
+                    ASSIGNEE_ALIASES.get(name.strip().casefold(), name.strip())
                     for name in str(row[positions["executor"]] or "").replace(";", ",").split(",")
                     if name.strip()
                 ],
@@ -70,18 +85,22 @@ def parse_excel(content: bytes, project_name: str, start_date) -> ProjectSnapsho
     return snapshot
 
 
-def export_excel(project) -> bytes:
+def export_excel(project, language: str = "en") -> bytes:
     workbook = Workbook()
     sheet = workbook.active
-    sheet.title = "Plan"
-    sheet.append(HEADERS)
+    localized = language == "ru"
+    sheet.title = "План" if localized else "Plan"
+    sheet.append(RUSSIAN_HEADERS if localized else HEADERS)
     names = {task.id: task.name for task in project.tasks}
     for task in project.tasks:
         sheet.append(
             [
                 task.name,
                 task.description,
-                ", ".join(task.assignees),
+                ", ".join(
+                    RUSSIAN_ASSIGNEES.get(assignee, assignee) if localized else assignee
+                    for assignee in task.assignees
+                ),
                 task.duration,
                 ", ".join(names[item] for item in task.predecessor_ids),
             ]

@@ -1,7 +1,7 @@
 from io import BytesIO
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from backend.excel import export_excel, parse_excel
 from backend.models import Person
@@ -29,6 +29,26 @@ def test_excel_round_trip():
     assert len(parsed.tasks) == 12
     assert parsed.tasks[0].assignees == ["Elena", "Pavel"]
     assert parsed.tasks[-1].predecessor_ids
+
+
+def test_russian_excel_round_trip():
+    source = ProjectStore()
+    source.snapshot.tasks[0].assignees = [Person.ELENA, Person.PAVEL]
+
+    data = export_excel(source.project(), language="ru")
+    sheet = load_workbook(BytesIO(data), read_only=True).active
+    parsed = parse_excel(data, "Импортированный проект", source.snapshot.start_date)
+
+    assert sheet.title == "План"
+    assert [cell.value for cell in sheet[1]] == [
+        "задача",
+        "описание",
+        "исполнитель",
+        "длительность",
+        "предшественники",
+    ]
+    assert sheet["C2"].value == "Елена, Павел"
+    assert parsed.tasks[0].assignees == ["Elena", "Pavel"]
 
 
 def test_excel_unknown_predecessor():
